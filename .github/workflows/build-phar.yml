@@ -42,7 +42,7 @@ jobs:
       run: ./vendor/bin/box compile
 
     - name: Upload PHAR as artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: srt-compare-phar
         path: srt-compare.phar
