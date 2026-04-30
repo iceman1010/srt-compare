@@ -6,7 +6,8 @@
         "bin/srt-compare",
         "vendor/autoload.php",
         "composer.json",
-        "composer.lock"
+        "composer.lock",
+        "VERSION"
     ],
     "exclude-composer-files": false,
     "force-autodiscovery": true
