@@ -1,0 +1,48 @@
+name: Build PHAR
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: '8.2'
+        extensions: mbstring, intl
+        ini-values: post_max_size=256M, short_open_tag=On
+        tools: composer
+
+    - name: Get Composer cache directory
+      id: composer-cache
+      run: echo "dir=$(composer config cache-dir)" >> $GITHUB_OUTPUT
+
+    - name: Cache Composer dependencies
+      uses: actions/cache@v3
+      with:
+        path: ${{ steps.composer-cache.outputs.dir }}
+        key: composer-${{ runner.os }}-${{ hashFiles('**/composer.lock') }}
+        restore-keys: composer-${{ runner.os }}-
+
+    - name: Install dependencies
+      run: composer install --prefer-dist --no-progress --no-suggest --optimize-autoloader
+
+    - name: Install humbug/box (if not already in require-dev)
+      run: composer require --dev humbug/box ^4.5
+
+    - name: Compile PHAR
+      run: ./vendor/bin/box compile
+
+    - name: Upload PHAR as artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: srt-compare-phar
+        path: srt-compare.phar
