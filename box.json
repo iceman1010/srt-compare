@@ -1,0 +1,13 @@
+{
+    "main": "bin/srt-compare",
+    "output": "srt-compare.phar",
+    "directories": ["src"],
+    "files": [
+        "bin/srt-compare",
+        "vendor/autoload.php",
+        "composer.json",
+        "composer.lock"
+    ],
+    "exclude-composer-files": false,
+    "force-autodiscovery": true
+}
