@@ -1,10 +1,11 @@
-name: Build PHAR
+name: Build PHAR & Create Release
 
 on:
   push:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build:
@@ -35,14 +36,51 @@ jobs:
     - name: Install dependencies
       run: composer install --prefer-dist --no-progress --no-suggest --optimize-autoloader
 
-    - name: Install humbug/box (if not already in require-dev)
-      run: composer require --dev humbug/box ^4.5
+    - name: Install humbug/box
+      run: ./vendor/bin/box --version || composer require --dev humbug/box ^4.5
+
+    - name: Get version from VERSION file
+      id: version
+      run: |
+        VERSION=$(cat VERSION | tr -d ' \t\n\r')
+        echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+        echo "Version detected: $VERSION"
 
     - name: Compile PHAR
       run: ./vendor/bin/box compile
 
-    - name: Upload PHAR as artifact
+    - name: Create Release & Upload PHAR
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v${{ steps.version.outputs.VERSION }}
+        name: srt-compare v${{ steps.version.outputs.VERSION }}
+        body: |
+          srt-compare v${{ steps.version.outputs.VERSION }}
+
+          ### Installation
+          Download the `srt-compare.phar` file and make it executable:
+          ```bash
+          chmod +x srt-compare.phar
+          sudo mv srt-compare.phar /usr/local/bin/srt-compare
+          ```
+
+          ### Usage
+          ```bash
+          srt-compare -i file1.srt -i file2.srt
+          ```
+
+          ### Changes
+          See commit history: https://github.com/${{ github.repository }}/commits/main
+        files: srt-compare.phar
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Upload PHAR as artifact (for PRs)
       uses: actions/upload-artifact@v4
       with:
         name: srt-compare-phar
         path: srt-compare.phar
+        retention-days: 30
