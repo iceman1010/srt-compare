@@ -29,3 +29,8 @@ test/*.srt
 
 # Install script
 install_local.sh
+
+#Agents
+.kilo/
+.claude/
+AGENTS.md

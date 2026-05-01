@@ -152,10 +152,4 @@ git commit -m "Description of changes"
 # git push  # Only after user says yes
 ```
 
-## Notes for AI Assistant
 
-- Users get frustrated when you push without asking
-- Always verify VERSION is updated before suggesting a push
-- Self-update mechanism is fragile - test it after modifying `Application.php`
-- The installed PHAR location may vary (`/usr/local/bin`, `/usr/bin`, etc.)
-- When in doubt, ask the user before taking action
