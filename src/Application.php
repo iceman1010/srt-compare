@@ -150,7 +150,6 @@ class Application extends ConsoleApplication
                     );
                     
                     $tempPhar = sys_get_temp_dir() . '/srt-compare.phar';
-                    $io->progressStart(100);
                     
                     $ch = curl_init($downloadUrl);
                     $fp = fopen($tempPhar, 'wb');
@@ -159,24 +158,29 @@ class Application extends ConsoleApplication
                     curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
                     curl_setopt($ch, CURLOPT_USERAGENT, 'srt-compare-self-update');
                     
-                    // Progress callback
-                    curl_setopt($ch, \CURLOPT_PROGRESSFUNCTION, function($ch, $dltotal, $dlnow, $ultotal, $ulnow) use ($io) {
+                    // Progress callback - using simple text output
+                    $lastProgress = -1;
+                    curl_setopt($ch, \CURLOPT_PROGRESSFUNCTION, function($ch, $dltotal, $dlnow, $ultotal, $ulnow) use (&$lastProgress, $io) {
                         if ($dltotal > 0) {
                             $progress = intval(($dlnow / $dltotal) * 100);
-                            $io->progressAdvance($progress - $io->getProgressStep());
+                            if ($progress !== $lastProgress && $progress % 10 === 0) {
+                                $io->text(sprintf('Downloading... %d%%', $progress));
+                                $lastProgress = $progress;
+                            }
                         }
                         return 0;
                     });
                     
                     curl_setopt($ch, CURLOPT_NOPROGRESS, false);
                     
+                    $io->text('Downloading...');
                     $result = curl_exec($ch);
                     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
                     $curlError = curl_error($ch);
                     curl_close($ch);
                     fclose($fp);
                     
-                    $io->progressFinish();
+                    $io->text('Download complete!');
                     
                     if ($curlError || $httpCode !== 200) {
                         @unlink($tempPhar);
