@@ -4,6 +4,34 @@ namespace App;
 
 class TerminalUI
 {
+    // ANSI color constants
+    private const RESET = "\033[0m";
+    private const BOLD = "\033[1m";
+    private const RED = "\033[31m";
+    private const GREEN = "\033[32m";
+    private const YELLOW = "\033[33m";
+    private const BLUE = "\033[34m";
+    private const MAGENTA = "\033[35m";
+    private const CYAN = "\033[36m";
+    private const WHITE = "\033[37m";
+    private const BRIGHT_BLACK = "\033[90m";
+    private const BRIGHT_RED = "\033[91m";
+    private const BRIGHT_GREEN = "\033[92m";
+    private const BRIGHT_YELLOW = "\033[93m";
+    private const BRIGHT_BLUE = "\033[94m";
+    private const BRIGHT_MAGENTA = "\033[95m";
+    private const BRIGHT_CYAN = "\033[96m";
+
+    // Semantic color assignments
+    private const COLOR_TIMECODE = self::BRIGHT_CYAN;
+    private const COLOR_CAPTION_INDEX = self::BRIGHT_YELLOW;
+    private const COLOR_CAPTION_TEXT = self::WHITE;
+    private const COLOR_SEPARATOR = self::BRIGHT_BLACK;
+    private const COLOR_HEADER = self::BOLD . self::BRIGHT_GREEN;
+    private const COLOR_FOOTER = self::BRIGHT_BLACK;
+    private const COLOR_DIVIDER = self::BLUE;
+    private const COLOR_FILE_NAME = self::BOLD . self::BRIGHT_MAGENTA;
+
     private array $comparisonData;
     private int $currentRow;
     private int $viewportHeight;
@@ -219,63 +247,104 @@ class TerminalUI
         // Get just the filenames without path
         $file1Name = basename($this->file1);
         $file2Name = basename($this->file2);
-        
-        // Create header with file names
-        $headerText = sprintf('Comparing: %s ↔ %s', $file1Name, $file2Name);
-        $padding = max(0, ($this->terminalWidth - strlen($headerText)) / 2);
+
+        // Create header with file names (colored)
+        $headerText = sprintf(
+            self::COLOR_HEADER . 'Comparing: ' . self::RESET .
+            self::COLOR_FILE_NAME . '%s' . self::RESET .
+            self::COLOR_HEADER . ' ↔ ' . self::RESET .
+            self::COLOR_FILE_NAME . '%s' . self::RESET,
+            $file1Name,
+            $file2Name
+        );
+        $padding = max(0, ($this->terminalWidth - strlen($file1Name) - strlen($file2Name) - 13) / 2);
         echo str_repeat(' ', (int)$padding) . $headerText . PHP_EOL;
-        echo str_repeat('═', $this->terminalWidth) . PHP_EOL . PHP_EOL;
+        echo self::COLOR_SEPARATOR . str_repeat('═', $this->terminalWidth) . self::RESET . PHP_EOL . PHP_EOL;
     }
 
     private function renderCaptions(): void
     {
         $endRow = min($this->currentRow + $this->viewportHeight, count($this->comparisonData));
-        $columnWidth = ($this->terminalWidth - 5) / 2; // Reserve space for separator and padding
-        $columnWidth = max(10, (int)$columnWidth); // Minimum column width
+        $columnWidth = (int)(($this->terminalWidth - 5) / 2); // Reserve space for separator and padding
+        $columnWidth = max(10, $columnWidth); // Minimum column width
 
         for ($i = $this->currentRow; $i < $endRow; $i++) {
             $pair = $this->comparisonData[$i];
             $left = $pair['left'];
             $right = $pair['right'];
 
-            // Format left caption
+            // Left column content
+            $leftLine1 = '';
+            $leftLine2 = '';
             if ($left !== null) {
+                $leftIndex = $left['index'];
                 $leftTimecode = sprintf('%s --> %s', $this->formatTime($left['start']), $this->formatTime($left['end']));
                 $leftText = $this->formatText($left['text']);
-                $leftLines = [
-                    sprintf('%3d %s', $left['index'], $leftTimecode),
-                    $leftText
-                ];
-            } else {
-                $leftLines = ['', ''];
+
+                // Build first line: index (colored) + timecode (colored)
+                $leftLine1 = sprintf(
+                    self::COLOR_CAPTION_INDEX . '%3d' . self::RESET . ' ' .
+                    self::COLOR_TIMECODE . '%s' . self::RESET,
+                    $leftIndex,
+                    $leftTimecode
+                );
+
+                // Build second line: text (colored)
+                $leftLine2 = self::COLOR_CAPTION_TEXT . $leftText . self::RESET;
             }
 
-            // Format right caption
+            // Right column content
+            $rightLine1 = '';
+            $rightLine2 = '';
             if ($right !== null) {
+                $rightIndex = $right['index'];
                 $rightTimecode = sprintf('%s --> %s', $this->formatTime($right['start']), $this->formatTime($right['end']));
                 $rightText = $this->formatText($right['text']);
-                $rightLines = [
-                    sprintf('%3d %s', $right['index'], $rightTimecode),
-                    $rightText
-                ];
-            } else {
-                $rightLines = ['', ''];
+
+                // Build first line: index (colored) + timecode (colored)
+                $rightLine1 = sprintf(
+                    self::COLOR_CAPTION_INDEX . '%3d' . self::RESET . ' ' .
+                    self::COLOR_TIMECODE . '%s' . self::RESET,
+                    $rightIndex,
+                    $rightTimecode
+                );
+
+                // Build second line: text (colored)
+                $rightLine2 = self::COLOR_CAPTION_TEXT . $rightText . self::RESET;
             }
 
-            // Render each line of the caption pair
-            for ($line = 0; $line < max(count($leftLines), count($rightLines)); $line++) {
-                $leftPart = isset($leftLines[$line]) ? $this->truncate($leftLines[$line], $columnWidth) : '';
-                $rightPart = isset($rightLines[$line]) ? $this->truncate($rightLines[$line], $columnWidth) : '';
+            // Render first line
+            $leftLine1Padded = $this->padToWidth($leftLine1, $columnWidth);
+            $rightLine1Padded = $this->padToWidth($rightLine1, $columnWidth);
+            echo $leftLine1Padded . self::COLOR_DIVIDER . ' │ ' . self::RESET . $rightLine1Padded . PHP_EOL;
 
-                // Pad left part to column width and add separator with visual divider
-                echo str_pad($leftPart, $columnWidth) . ' │ ' . str_pad($rightPart, $columnWidth) . PHP_EOL;
-            }
+            // Render second line
+            $leftLine2Padded = $this->padToWidth($leftLine2, $columnWidth);
+            $rightLine2Padded = $this->padToWidth($rightLine2, $columnWidth);
+            echo $leftLine2Padded . self::COLOR_DIVIDER . ' │ ' . self::RESET . $rightLine2Padded . PHP_EOL;
 
-            // Add a subtle separator between captions for readability (except after last caption)
+            // Add separator between captions (except after last caption)
             if ($i < $endRow - 1) {
-                echo str_repeat('─', $this->terminalWidth) . PHP_EOL;
+                echo self::COLOR_SEPARATOR . str_repeat('─', $this->terminalWidth) . self::RESET . PHP_EOL;
             }
         }
+    }
+
+    private function visibleLength(string $text): int
+    {
+        // Remove ANSI escape sequences and calculate visible length
+        $clean = preg_replace('/\033\[[0-9;]*m/', '', $text);
+        return mb_strlen($clean, 'UTF-8');
+    }
+
+    private function padToWidth(string $text, int $width): string
+    {
+        $visibleLen = $this->visibleLength($text);
+
+        if ($visibleLen >= $width) {
+            return $text; // Already at or exceeding width
+        }
+        return $text . str_repeat(' ', $width - $visibleLen);
     }
 
     private function renderFooter(): void
@@ -283,17 +352,34 @@ class TerminalUI
         $total = count($this->comparisonData);
         $start = $this->currentRow + 1;
         $end = min($this->currentRow + $this->viewportHeight, $total);
-        $info = sprintf('Caption %d-%d of %d', $start, $end, $total);
-        $controls = '[j/k: ↓/↑, Page Up/Down, Home/End, q: quit]';
-        $footer = sprintf('%s %s', $info, $controls);
+
+        // Build colored footer
+        $info = sprintf(
+            self::COLOR_FOOTER . 'Caption ' . self::RESET .
+            self::COLOR_CAPTION_INDEX . '%d-%d' . self::RESET .
+            self::COLOR_FOOTER . ' of ' . self::RESET .
+            self::COLOR_CAPTION_INDEX . '%d' . self::RESET,
+            $start,
+            $end,
+            $total
+        );
+
+        $controls = self::COLOR_FOOTER . '[j/k: ↓/↑, Page Up/Down, Home/End, q: quit]' . self::RESET;
+
+        // Calculate visible length (without ANSI codes)
+        $infoVisible = $this->visibleLength($info);
+        $controlsVisible = $this->visibleLength($controls);
+        $totalVisible = $infoVisible + 1 + $controlsVisible; // +1 for space separator
 
         // Ensure footer fits within terminal width
-        if (strlen($footer) > $this->terminalWidth) {
-            $footer = substr($footer, 0, $this->terminalWidth - 3) . '...';
+        if ($totalVisible > $this->terminalWidth) {
+            $controls = self::COLOR_FOOTER . '[...]' . self::RESET;
+            $controlsVisible = 5; // [...]
+            $totalVisible = $infoVisible + 1 + $controlsVisible;
         }
 
-        $padding = $this->terminalWidth - strlen($footer);
-        echo PHP_EOL . str_repeat(' ', max(0, $padding)) . $footer;
+        $padding = max(0, $this->terminalWidth - $totalVisible);
+        echo PHP_EOL . str_repeat(' ', $padding) . $info . ' ' . $controls;
     }
 
     private function readKey($stdin): ?string
