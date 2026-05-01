@@ -9,74 +9,178 @@ class TerminalUI
     private int $viewportHeight;
     private ?int $terminalWidth;
     private ?int $terminalHeight;
+    private string $file1;
+    private string $file2;
+    private ?string $savedTerminalState = null;
+    private $stdinHandle = null;
+    private bool $windowResized = false;
+    private int $lastRenderedRow = -1;
+    private int $lastRenderedWidth = -1;
+    private int $lastRenderedHeight = -1;
 
-    public function __construct(array $comparisonData)
+    public function __construct(array $comparisonData, string $file1, string $file2)
     {
         $this->comparisonData = $comparisonData;
         $this->currentRow = 0;
         $this->viewportHeight = 0;
         $this->terminalWidth = null;
         $this->terminalHeight = null;
+        $this->file1 = $file1;
+        $this->file2 = $file2;
+    }
+
+    private function configureTerminal(): void
+    {
+        // Save current terminal state
+        exec('stty -g', $output, $returnCode);
+        if ($returnCode === 0 && !empty($output[0])) {
+            $this->savedTerminalState = $output[0];
+        }
+
+        // Set raw mode: no echo, no canonical input buffering
+        exec('stty -echo -icanon min 0 time 0 2>/dev/null');
+
+        // Setup SIGWINCH handler for window resize detection (if pcntl available)
+        if (function_exists('pcntl_signal')) {
+            pcntl_signal(SIGWINCH, function() {
+                $this->windowResized = true;
+            });
+        }
+    }
+
+    private function restoreTerminal(): void
+    {
+        if ($this->savedTerminalState) {
+            exec('stty ' . escapeshellarg($this->savedTerminalState) . ' 2>/dev/null');
+        }
+    }
+
+    private function needsRender(): bool
+    {
+        // Always render if window was resized
+        if ($this->windowResized) {
+            return true;
+        }
+
+        // Always render on first frame
+        if ($this->lastRenderedRow === -1) {
+            return true;
+        }
+
+        // Render if scroll position changed
+        if ($this->currentRow !== $this->lastRenderedRow) {
+            return true;
+        }
+
+        // Render if terminal dimensions changed
+        if ($this->terminalWidth !== $this->lastRenderedWidth || $this->terminalHeight !== $this->lastRenderedHeight) {
+            return true;
+        }
+
+        // No changes, don't render
+        return false;
+    }
+
+    private function updateRenderState(): void
+    {
+        $this->lastRenderedRow = $this->currentRow;
+        $this->lastRenderedWidth = $this->terminalWidth;
+        $this->lastRenderedHeight = $this->terminalHeight;
     }
 
     public function render(): void
     {
-        // Get terminal size
-        $size = $this->getTerminalSize();
-        $this->terminalWidth = $size[0];
-        $this->terminalHeight = $size[1];
+        try {
+            $this->configureTerminal();
+            $this->stdinHandle = fopen('php://stdin', 'r');
+            stream_set_blocking($this->stdinHandle, false);
 
-        // Calculate viewport height (reserve lines for header, footer, and padding)
-        $this->viewportHeight = max(1, $this->terminalHeight - 4);
+            // Get terminal size
+            $size = $this->getTerminalSize();
+            $this->terminalWidth = $size[0];
+            $this->terminalHeight = $size[1];
 
-        // Ensure currentRow is within bounds
-        $this->currentRow = max(0, min($this->currentRow, count($this->comparisonData) - 1));
+            // Calculate viewport height (reserve lines for header, footer, and padding)
+            $this->viewportHeight = max(1, $this->terminalHeight - 4);
 
-        // Adjust currentRow so that the viewport shows a valid range
-        if ($this->currentRow + $this->viewportHeight > count($this->comparisonData)) {
-            $this->currentRow = max(0, count($this->comparisonData) - $this->viewportHeight);
-        }
+            // Ensure currentRow is within bounds
+            $this->currentRow = max(0, min($this->currentRow, count($this->comparisonData) - 1));
 
-        // Main render loop
-        while (true) {
-            $this->clearScreen();
-            $this->renderHeader();
-            $this->renderCaptions();
-            $this->renderFooter();
-
-            $key = $this->readKey();
-            if ($key === null) {
-                continue;
+            // Adjust currentRow so that the viewport shows a valid range
+            if ($this->currentRow + $this->viewportHeight > count($this->comparisonData)) {
+                $this->currentRow = max(0, count($this->comparisonData) - $this->viewportHeight);
             }
 
-            switch ($key) {
-                case 'q':
-                case "\x03": // Ctrl+C
-                    return;
-                case 'j':
-                case "\x1b[B": // Down arrow
-                    $this->scrollDown();
-                    break;
-                case 'k':
-                case "\x1b[A": // Up arrow
-                    $this->scrollUp();
-                    break;
-                case "\x1b[5~": // Page Up
-                    $this->scrollPageUp();
-                    break;
-                case "\x1b[6~": // Page Down
-                    $this->scrollPageDown();
-                    break;
-                case "\x1b[H": // Home
-                    $this->scrollToTop();
-                    break;
-                case "\x1b[F": // End
-                    $this->scrollToBottom();
-                    break;
-                default:
-                    // Ignore other keys
-                    break;
+            // Main render loop
+            while (true) {
+                // Handle window resize
+                if ($this->windowResized) {
+                    $this->windowResized = false;
+                    $size = $this->getTerminalSize();
+                    $this->terminalWidth = $size[0];
+                    $this->terminalHeight = $size[1];
+                    $this->viewportHeight = max(1, $this->terminalHeight - 4);
+                    
+                    // Adjust currentRow if it's now out of bounds
+                    if ($this->currentRow + $this->viewportHeight > count($this->comparisonData)) {
+                        $this->currentRow = max(0, count($this->comparisonData) - $this->viewportHeight);
+                    }
+                }
+
+                // Only render if state has changed
+                if ($this->needsRender()) {
+                    $this->clearScreen();
+                    $this->renderHeader();
+                    $this->renderCaptions();
+                    $this->renderFooter();
+                    $this->updateRenderState();
+                } else {
+                    // No render needed, but still need to process input
+                    // Use a small sleep to avoid busy-waiting
+                    usleep(50000); // 50ms
+                }
+
+                $key = $this->readKey($this->stdinHandle);
+                if ($key === null) {
+                    continue;
+                }
+
+                switch ($key) {
+                    case 'q':
+                    case "\x03": // Ctrl+C
+                        return;
+                    case 'j':
+                    case "\x1b[B": // Down arrow
+                        $this->scrollDown();
+                        break;
+                    case 'k':
+                    case "\x1b[A": // Up arrow
+                        $this->scrollUp();
+                        break;
+                    case "\x1b[5~": // Page Up
+                        $this->scrollPageUp();
+                        break;
+                    case "\x1b[6~": // Page Down
+                        $this->scrollPageDown();
+                        break;
+                    case "\x1b[H": // Home
+                    case "\x1b[1~": // Home variant
+                        $this->scrollToTop();
+                        break;
+                    case "\x1b[F": // End
+                    case "\x1b[4~": // End variant
+                        $this->scrollToBottom();
+                        break;
+                    default:
+                        // Ignore other keys
+                        break;
+                }
             }
+        } finally {
+            if ($this->stdinHandle) {
+                fclose($this->stdinHandle);
+            }
+            $this->restoreTerminal();
         }
     }
 
@@ -108,17 +212,21 @@ class TerminalUI
 
     private function renderHeader(): void
     {
-        // We don't have file names in this context, so just show a title
-        $title = 'SRT Compare';
-        $padding = max(0, ($this->terminalWidth - strlen($title)) / 2);
-        echo str_repeat(' ', (int)$padding) . $title . PHP_EOL;
-        echo str_repeat('=', $this->terminalWidth) . PHP_EOL . PHP_EOL;
+        // Get just the filenames without path
+        $file1Name = basename($this->file1);
+        $file2Name = basename($this->file2);
+        
+        // Create header with file names
+        $headerText = sprintf('Comparing: %s ↔ %s', $file1Name, $file2Name);
+        $padding = max(0, ($this->terminalWidth - strlen($headerText)) / 2);
+        echo str_repeat(' ', (int)$padding) . $headerText . PHP_EOL;
+        echo str_repeat('═', $this->terminalWidth) . PHP_EOL . PHP_EOL;
     }
 
     private function renderCaptions(): void
     {
         $endRow = min($this->currentRow + $this->viewportHeight, count($this->comparisonData));
-        $columnWidth = ($this->terminalWidth - 4) / 2; // Reserve space for separator and padding
+        $columnWidth = ($this->terminalWidth - 5) / 2; // Reserve space for separator and padding
         $columnWidth = max(10, (int)$columnWidth); // Minimum column width
 
         for ($i = $this->currentRow; $i < $endRow; $i++) {
@@ -155,13 +263,13 @@ class TerminalUI
                 $leftPart = isset($leftLines[$line]) ? $this->truncate($leftLines[$line], $columnWidth) : '';
                 $rightPart = isset($rightLines[$line]) ? $this->truncate($rightLines[$line], $columnWidth) : '';
 
-                // Pad left part to column width and add separator
-                echo str_pad($leftPart, $columnWidth) . '  ' . str_pad($rightPart, $columnWidth) . PHP_EOL;
+                // Pad left part to column width and add separator with visual divider
+                echo str_pad($leftPart, $columnWidth) . ' │ ' . str_pad($rightPart, $columnWidth) . PHP_EOL;
             }
 
-            // Add a blank line between captions for readability
+            // Add a subtle separator between captions for readability (except after last caption)
             if ($i < $endRow - 1) {
-                echo PHP_EOL;
+                echo str_repeat('─', $this->terminalWidth) . PHP_EOL;
             }
         }
     }
@@ -184,56 +292,60 @@ class TerminalUI
         echo PHP_EOL . str_repeat(' ', max(0, $padding)) . $footer;
     }
 
-    private function readKey(): ?string
+    private function readKey($stdin): ?string
     {
-        // Set stdin to non-blocking mode
-        $stdin = fopen('php://stdin', 'r');
-        stream_set_blocking($stdin, 0);
-
-        $key = null;
+        $startTime = microtime(true);
+        $timeout = 0.1; // 100ms timeout
         $buffer = '';
 
-        while (true) {
-            $c = fread($stdin, 1);
-            if ($c === false) {
-                usleep(50000); // 50ms
+        while (microtime(true) - $startTime < $timeout) {
+            // Process pending signals (for SIGWINCH handling)
+            if (function_exists('pcntl_signal_dispatch')) {
+                pcntl_signal_dispatch();
+            }
+
+            $char = @fread($stdin, 1);
+            if ($char === false || $char === '') {
+                usleep(5000); // 5ms between checks
                 continue;
             }
 
-            $buffer .= $c;
+            $buffer .= $char;
 
-            // Check for escape sequences
+            // Ctrl+C (always immediate)
+            if ($char === "\x03") {
+                return "\x03";
+            }
+
+            // Regular keys (single byte)
+            if (in_array($char, ['q', 'j', 'k'])) {
+                return $char;
+            }
+
+            // Ignore newlines and carriage returns
+            if ($char === "\n" || $char === "\r") {
+                $buffer = '';
+                continue;
+            }
+
+            // Escape sequence detection
             if ($buffer === "\x1b") {
-                // Escape key - treat as quit for simplicity
-                $key = "\x1b";
-                break;
-            } elseif ($buffer === "\x1b[") {
-                // Start of escape sequence, wait for more
-                continue;
-            } elseif (strlen($buffer) >= 3 && $buffer[0] === "\x1b" && $buffer[1] === '[') {
-                // We have an escape sequence
-                $key = $buffer;
-                break;
-            } elseif ($c === "\x03") { // Ctrl+C
-                $key = "\x03";
-                break;
-            } elseif ($c === "j" || $c === "k" || $c === "q") {
-                $key = $c;
-                break;
-            } elseif ($c === "\n" || $c === "\r") {
-                // Ignore enter
-                $buffer = '';
-                continue;
-            } else {
-                // Printable character, but we only care about specific ones
-                // Reset buffer for next key
-                $buffer = '';
-                continue;
+                continue; // Wait for next byte
+            }
+
+            // Check if we have a complete escape sequence
+            // Matches: \x1b[A (single letter) or \x1b[5~ (tilde-terminated)
+            if (preg_match('/^\x1b\[([A-Za-z]|[0-9;]*[~])$/', $buffer)) {
+                return $buffer;
             }
         }
 
-        fclose($stdin);
-        return $key;
+        // Dispatch pending signals before returning
+        if (function_exists('pcntl_signal_dispatch')) {
+            pcntl_signal_dispatch();
+        }
+
+        return null;
     }
 
     private function scrollDown(): void

@@ -84,7 +84,7 @@ class Application extends ConsoleApplication
                 }
                 
                 // Render UI
-                $ui = new \App\TerminalUI($comparisonData);
+                $ui = new \App\TerminalUI($comparisonData, $file1, $file2);
                 $ui->render();
                 
                 return Command::SUCCESS;
@@ -98,22 +98,12 @@ class Application extends ConsoleApplication
                 $currentVersion = trim(file_get_contents(__DIR__ . '/../VERSION'));
                 $io->text(sprintf('Current version: %s', $currentVersion));
                 
-                // Fetch latest version from GitHub
-                $latestVersionUrl = 'https://api.github.com/repos/iceman1010/srt-compare/releases/latest';
-                
-                $io->text('Checking for latest version...');
-                
-                $ch = curl_init($latestVersionUrl);
+                // Get remote version from GitHub
+                $remoteVersionUrl = 'https://raw.githubusercontent.com/iceman1010/srt-compare/main/VERSION';
+                $ch = curl_init($remoteVersionUrl);
                 curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
                 curl_setopt($ch, CURLOPT_USERAGENT, 'srt-compare-self-update');
-                
-                // Add GitHub token if available (for higher rate limits)
-                $githubToken = getenv('GITHUB_TOKEN');
-                if ($githubToken) {
-                    curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: token ' . $githubToken]);
-                }
-                
-                $response = curl_exec($ch);
+                $remoteVersionContent = curl_exec($ch);
                 $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
                 curl_close($ch);
                 
@@ -122,46 +112,90 @@ class Application extends ConsoleApplication
                     return Command::FAILURE;
                 }
                 
-                $data = json_decode($response, true);
-                if (json_last_error() !== JSON_ERROR_NONE) {
+                $remoteVersion = trim($remoteVersionContent);
+                if (empty($remoteVersion)) {
                     $io->error('Invalid response from GitHub.');
                     return Command::FAILURE;
                 }
                 
-                $latestVersion = $data['tag_name'] ?? $data['name'] ?? '';
-                if (!$latestVersion) {
-                    $io->error('Could not determine latest version.');
-                    return Command::FAILURE;
-                }
+                $io->text(sprintf('Latest version: %s', $remoteVersion));
                 
-                // Remove 'v' prefix if present
-                $latestVersion = ltrim($latestVersion, 'v');
-                
-                $io->text(sprintf('Latest version: %s', $latestVersion));
-                
-                if (version_compare($latestVersion, $currentVersion, '>')) {
+                if (version_compare($remoteVersion, $currentVersion, '>')) {
                     $io->text('Update available! Downloading...');
                     
-                    // Find the PHAR asset
-                    $pharAssetUrl = null;
-                    foreach ($data['assets'] as $asset) {
-                        if (str_ends_with($asset['name'], '.phar')) {
-                            $pharAssetUrl = $asset['browser_download_url'];
+                    // Get the latest workflow run for the build-phar workflow
+                    $workflowRunsUrl = 'https://api.github.com/repos/iceman1010/srt-compare/actions/workflows/build-phar.yml/runs?branch=main&per_page=1';
+                    $ch = curl_init($workflowRunsUrl);
+                    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                    curl_setopt($ch, CURLOPT_USERAGENT, 'srt-compare-self-update');
+                    $githubToken = getenv('GITHUB_TOKEN');
+                    if ($githubToken) {
+                        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: token ' . $githubToken]);
+                    }
+                    $workflowResponse = curl_exec($ch);
+                    $workflowHttpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                    curl_close($ch);
+                    
+                    if ($workflowHttpCode !== 200) {
+                        $io->error('Failed to check for workflow runs. Please try again later.');
+                        return Command::FAILURE;
+                    }
+                    
+                    $workflowData = json_decode($workflowResponse, true);
+                    if (json_last_error() !== JSON_ERROR_NONE || empty($workflowData['workflow_runs'])) {
+                        $io->error('No workflow runs found.');
+                        return Command::FAILURE;
+                    }
+                    
+                    $run = $workflowData['workflow_runs'][0];
+                    if ($run['conclusion'] !== 'success') {
+                        $io->error('Latest workflow run was not successful.');
+                        return Command::FAILURE;
+                    }
+                    
+                    // Get artifacts for this run
+                    $artifactsUrl = $run['artifacts_url'];
+                    $ch = curl_init($artifactsUrl);
+                    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                    curl_setopt($ch, CURLOPT_USERAGENT, 'srt-compare-self-update');
+                    if ($githubToken) {
+                        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: token ' . $githubToken]);
+                    }
+                    $artifactsResponse = curl_exec($ch);
+                    $artifactsHttpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                    curl_close($ch);
+                    
+                    if ($artifactsHttpCode !== 200) {
+                        $io->error('Failed to get artifacts. Please try again later.');
+                        return Command::FAILURE;
+                    }
+                    
+                    $artifactsData = json_decode($artifactsResponse, true);
+                    if (json_last_error() !== JSON_ERROR_NONE || empty($artifactsData['artifacts'])) {
+                        $io->error('No artifacts found.');
+                        return Command::FAILURE;
+                    }
+                    
+                    $pharAsset = null;
+                    foreach ($artifactsData['artifacts'] as $artifact) {
+                        if ($artifact['name'] === 'srt-compare-phar') {
+                            $pharAsset = $artifact;
                             break;
                         }
                     }
                     
-                    if (!$pharAssetUrl) {
-                        $io->error('Could not find PHAR asset in latest release.');
+                    if (!$pharAsset) {
+                        $io->error('PHAR artifact not found.');
                         return Command::FAILURE;
                     }
                     
-                    // Download the new PHAR
-                    $tempFile = sys_get_temp_dir() . '/srt-compare-new.phar';
+                    // Download the artifact
+                    $downloadUrl = $pharAsset['archive_download_url'];
+                    $tempZip = sys_get_temp_dir() . '/srt-compare-update.zip';
                     $io->progressStart(100);
                     
-                    $ch = curl_init($pharAssetUrl);
-                    $fp = fopen($tempFile, 'w');
+                    $ch = curl_init($downloadUrl);
+                    $fp = fopen($tempZip, 'wb');
                     
                     curl_setopt($ch, CURLOPT_FILE, $fp);
                     curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
@@ -191,30 +225,54 @@ class Application extends ConsoleApplication
                     
                     if ($curlError) {
                         $io->error('Download failed: ' . $curlError);
-                        @unlink($tempFile);
+                        @unlink($tempZip);
                         return Command::FAILURE;
                     }
                     
                     if (!$result) {
                         $io->error('Download failed.');
-                        @unlink($tempFile);
+                        @unlink($tempZip);
+                        return Command::FAILURE;
+                    }
+                    
+                    // Extract the PHAR from the zip
+                    $tempPhar = sys_get_temp_dir() . '/srt-compare.phar';
+                    $zip = new ZipArchive();
+                    if ($zip->open($tempZip) !== true) {
+                        $io->error('Failed to open ZIP file.');
+                        @unlink($tempZip);
+                        return Command::FAILURE;
+                    }
+                    
+                    // Extract the PHAR file (we know it's named srt-compare.phar in the zip)
+                    if (!$zip->extractTo(sys_get_temp_dir(), ['srt-compare.phar'])) {
+                        $io->error('Failed to extract PHAR from ZIP.');
+                        $zip->close();
+                        @unlink($tempZip);
+                        return Command::FAILURE;
+                    }
+                    $zip->close();
+                    @unlink($tempZip);
+                    
+                    if (!file_exists($tempPhar)) {
+                        $io->error('Extracted PHAR not found.');
                         return Command::FAILURE;
                     }
                     
                     // Make executable
-                    chmod($tempFile, 0755);
+                    chmod($tempPhar, 0755);
                     
                     // Replace current PHAR
                     $currentPhar = __DIR__ . '/../srt-compare.phar';
-                    if (rename($tempFile, $currentPhar)) {
+                    if (rename($tempPhar, $currentPhar)) {
                         // Update VERSION file
-                        file_put_contents(__DIR__ . '/../VERSION', $latestVersion);
-                        $io->success(sprintf('Updated to version %s!', $latestVersion));
+                        file_put_contents(__DIR__ . '/../VERSION', $remoteVersion);
+                        $io->success(sprintf('Updated to version %s!', $remoteVersion));
                         $io->text('Please restart the application to use the new version.');
                         return Command::SUCCESS;
                     } else {
                         $io->error('Failed to replace the current PHAR file.');
-                        @unlink($tempFile);
+                        @unlink($tempPhar);
                         return Command::FAILURE;
                     }
                 } else {
