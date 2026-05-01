@@ -100,8 +100,11 @@ class TerminalUI
             $this->terminalWidth = $size[0];
             $this->terminalHeight = $size[1];
 
-            // Calculate viewport height (reserve lines for header, footer, and padding)
-            $this->viewportHeight = max(1, $this->terminalHeight - 4);
+            // Calculate viewport height: max caption pairs that fit on screen
+            // Layout: header (3 lines) + N caption pairs (3 lines each except last: 2) + footer (2 lines)
+            // Total lines ≈ 3*N + 4. Solve: N = floor((terminalHeight - 4) / 3).
+            // Ensure at least 1 pair visible.
+            $this->viewportHeight = max(1, (int) floor(($this->terminalHeight - 4) / 3));
 
             // Ensure currentRow is within bounds
             $this->currentRow = max(0, min($this->currentRow, count($this->comparisonData) - 1));
@@ -119,7 +122,8 @@ class TerminalUI
                     $size = $this->getTerminalSize();
                     $this->terminalWidth = $size[0];
                     $this->terminalHeight = $size[1];
-                    $this->viewportHeight = max(1, $this->terminalHeight - 4);
+                    // Recalculate viewport height using same logic as initial
+                    $this->viewportHeight = max(1, (int) floor(($this->terminalHeight - 4) / 3));
                     
                     // Adjust currentRow if it's now out of bounds
                     if ($this->currentRow + $this->viewportHeight > count($this->comparisonData)) {
