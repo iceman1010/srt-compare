@@ -24,11 +24,21 @@ class Application extends ConsoleApplication
                 $this
                     ->setName('compare')
                     ->setDescription('Compare two subtitle files')
+                    ->addArgument(
+                        'file1',
+                        InputArgument::OPTIONAL,
+                        'First subtitle file'
+                    )
+                    ->addArgument(
+                        'file2',
+                        InputArgument::OPTIONAL,
+                        'Second subtitle file'
+                    )
                     ->addOption(
                         'file',
                         'i',
                         InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY,
-                        'Subtitle file'
+                        'Subtitle file (alternative to positional args)'
                     )
                     ->addOption(
                         'update',
@@ -48,10 +58,20 @@ class Application extends ConsoleApplication
                 }
                 
                 $files = $input->getOption('file');
+                
+                // If no -i files provided, check positional arguments
+                if (empty($files)) {
+                    $file1 = $input->getArgument('file1');
+                    $file2 = $input->getArgument('file2');
+                    
+                    if ($file1 !== null && $file2 !== null) {
+                        $files = [$file1, $file2];
+                    }
+                }
 
                 // Validate that exactly two files are provided
                 if ($files === null || count($files) !== 2) {
-                    $io->error('Exactly two subtitle files are required. Use -i <file1> -i <file2>');
+                    $io->error('Exactly two subtitle files are required. Usage: srt-compare <file1> <file2> or srt-compare -i <file1> -i <file2>');
                     return Command::FAILURE;
                 }
                 

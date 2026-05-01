@@ -1,0 +1,31 @@
+# Dependencies
+/vendor/
+composer.lock
+
+# Build artifacts
+srt-compare.phar
+*.phar
+box.phar
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+test/*.vtt
+test/*.srt
+!test/test1.srt
+!test/test2.srt
+!test/test3.srt
+
+# Logs
+*.log
+
+# Install script
+install_local.sh
