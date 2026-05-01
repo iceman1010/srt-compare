@@ -151,6 +151,8 @@ class Application extends ConsoleApplication
                     
                     $tempPhar = sys_get_temp_dir() . '/srt-compare.phar';
                     
+                    $io->text('Downloading...');
+                    
                     $ch = curl_init($downloadUrl);
                     $fp = fopen($tempPhar, 'wb');
                     
@@ -158,22 +160,10 @@ class Application extends ConsoleApplication
                     curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
                     curl_setopt($ch, CURLOPT_USERAGENT, 'srt-compare-self-update');
                     
-                    // Progress callback - using simple text output
-                    $lastProgress = -1;
-                    curl_setopt($ch, \CURLOPT_PROGRESSFUNCTION, function($ch, $dltotal, $dlnow, $ultotal, $ulnow) use (&$lastProgress, $io) {
-                        if ($dltotal > 0) {
-                            $progress = intval(($dlnow / $dltotal) * 100);
-                            if ($progress !== $lastProgress && $progress % 10 === 0) {
-                                $io->text(sprintf('Downloading... %d%%', $progress));
-                                $lastProgress = $progress;
-                            }
-                        }
-                        return 0;
-                    });
+                    if ($githubToken) {
+                        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: token ' . $githubToken]);
+                    }
                     
-                    curl_setopt($ch, CURLOPT_NOPROGRESS, false);
-                    
-                    $io->text('Downloading...');
                     $result = curl_exec($ch);
                     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
                     $curlError = curl_error($ch);
@@ -196,17 +186,38 @@ class Application extends ConsoleApplication
                     
                     // Make executable
                     chmod($tempPhar, 0755);
-                    
-                    // Replace current PHAR
-                    $currentPhar = __DIR__ . '/../srt-compare.phar';
+
+                    // Determine the installed PHAR location
+                    $currentPhar = realpath($_SERVER['SCRIPT_FILENAME']);
+                    if (!$currentPhar || !is_writable($currentPhar)) {
+                        // Try to find the phar in common install locations
+                        $possiblePaths = [
+                            '/usr/local/bin/srt-compare',
+                            '/usr/bin/srt-compare',
+                            __DIR__ . '/../srt-compare.phar'
+                        ];
+
+                        foreach ($possiblePaths as $path) {
+                            if (file_exists($path) && is_writable($path)) {
+                                $currentPhar = $path;
+                                break;
+                            }
+                        }
+                    }
+
                     if (rename($tempPhar, $currentPhar)) {
-                        // Update VERSION file
-                        file_put_contents(__DIR__ . '/../VERSION', $remoteVersion);
+                        // Update VERSION file in the same directory as the PHAR
+                        $versionFile = dirname($currentPhar) . '/VERSION';
+                        if (!is_writable($versionFile)) {
+                            // Try the source directory as fallback
+                            $versionFile = __DIR__ . '/../VERSION';
+                        }
+                        file_put_contents($versionFile, $remoteVersion);
                         $io->success(sprintf('Updated to version %s!', $remoteVersion));
                         $io->text('Please restart the application to use the new version.');
                         return Command::SUCCESS;
                     } else {
-                        $io->error('Failed to replace the current PHAR file.');
+                        $io->error('Failed to replace the current PHAR file. Try running with sudo.');
                         @unlink($tempPhar);
                         return Command::FAILURE;
                     }
