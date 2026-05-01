@@ -206,7 +206,7 @@ class Application extends ConsoleApplication
                     }
                     
                     // Progress callback
-                    curl_setopt($ch, CURLOPT_XFERINFOFUNCTION, function($ch, $dltotal, $dlnow, $ultotal, $ulnow) use ($io) {
+                    curl_setopt($ch, \CURLOPT_PROGRESSFUNCTION, function($ch, $dltotal, $dlnow, $ultotal, $ulnow) use ($io) {
                         if ($dltotal > 0) {
                             $progress = intval(($dlnow / $dltotal) * 100);
                             $io->progressAdvance($progress - $io->getProgressStep());
