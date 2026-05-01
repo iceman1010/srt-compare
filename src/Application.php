@@ -187,37 +187,37 @@ class Application extends ConsoleApplication
                     // Make executable
                     chmod($tempPhar, 0755);
 
-                    // Determine the installed PHAR location
+                    // Get the path of the currently running PHAR/script
                     $currentPhar = realpath($_SERVER['SCRIPT_FILENAME']);
-                    if (!$currentPhar || !is_writable($currentPhar)) {
-                        // Try to find the phar in common install locations
-                        $possiblePaths = [
-                            '/usr/local/bin/srt-compare',
-                            '/usr/bin/srt-compare',
-                            __DIR__ . '/../srt-compare.phar'
+
+                    if (!$currentPhar) {
+                        $io->error('Could not determine current PHAR location.');
+                        @unlink($tempPhar);
+                        return Command::FAILURE;
+                    }
+
+                    // Replace the current PHAR with the downloaded one
+                    if (rename($tempPhar, $currentPhar)) {
+                        // Update VERSION file - try same directory as PHAR first, then source directory
+                        $versionPaths = [
+                            dirname($currentPhar) . DIRECTORY_SEPARATOR . 'VERSION',
+                            __DIR__ . DIRECTORY_SEPARATOR . '..' . DIRECTORY_SEPARATOR . 'VERSION'
                         ];
 
-                        foreach ($possiblePaths as $path) {
-                            if (file_exists($path) && is_writable($path)) {
-                                $currentPhar = $path;
+                        $versionUpdated = false;
+                        foreach ($versionPaths as $versionFile) {
+                            if (is_writable($versionFile) || !file_exists($versionFile)) {
+                                file_put_contents($versionFile, $remoteVersion);
+                                $versionUpdated = true;
                                 break;
                             }
                         }
-                    }
 
-                    if (rename($tempPhar, $currentPhar)) {
-                        // Update VERSION file in the same directory as the PHAR
-                        $versionFile = dirname($currentPhar) . '/VERSION';
-                        if (!is_writable($versionFile)) {
-                            // Try the source directory as fallback
-                            $versionFile = __DIR__ . '/../VERSION';
-                        }
-                        file_put_contents($versionFile, $remoteVersion);
                         $io->success(sprintf('Updated to version %s!', $remoteVersion));
                         $io->text('Please restart the application to use the new version.');
                         return Command::SUCCESS;
                     } else {
-                        $io->error('Failed to replace the current PHAR file. Try running with sudo.');
+                        $io->error('Failed to replace the current file. Check permissions or try running with elevated privileges.');
                         @unlink($tempPhar);
                         return Command::FAILURE;
                     }
