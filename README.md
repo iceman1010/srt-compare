@@ -13,7 +13,11 @@ A terminal application to compare two subtitle files side-by-side with keyboard 
   - `Page Up` / `Page Down`: Scroll multiple lines
   - `Home` / `End`: Jump to start/end
   - `q` or `Ctrl+C`: Quit application
-- **Plain text output**: No colors or highlighting - ideal for translation comparison
+- **Color-coded output**: 
+  - Timecodes in cyan
+  - Caption indices in yellow
+  - Caption text in white
+  - Layout elements in blue/dim
 - **Format agnostic**: Supports SRT, VTT, and other formats via mantas-done/subtitles
 - **Self-updating**: Use `--update` flag to get latest version from GitHub
 - **Standalone distribution**: Single executable PHAR file
@@ -72,6 +76,14 @@ composer require --dev humbug/box
 ./srt-compare.phar --help
 ```
 
+### Display
+
+The TUI shows both files side-by-side with:
+- Colored timecodes (cyan) for easy time reference
+- Caption indices (yellow) to track subtitle numbers
+- Clean text display (white) for readability
+- Visual separators (blue) between entries
+
 ## Keyboard Controls
 
 | Key | Action |
@@ -88,7 +100,7 @@ composer require --dev humbug/box
 
 1. **File Loading**: Uses [mantas-done/subtitles](https://github.com/mantas-done/subtitles) to parse subtitle files (SRT, VTT, ASS, etc.)
 2. **Comparison**: Matches subtitles by caption index (1st caption from file 1 ↔ 1st caption from file 2, etc.)
-3. **Display**: Renders two columns with caption index, timecode, and text
+3. **Display**: Renders two columns with colored caption index (yellow), timecode (cyan), and text (white)
 4. **Navigation**: Tracks viewport and renders visible portion based on terminal size
 5. **Updates**: Checks GitHub releases for newer versions and can replace itself
 
@@ -140,14 +152,16 @@ Compare your work against a reference:
 
 ## Release Process
 
-1. Update VERSION file with new version number
-2. Commit changes: `git commit -am "Release vX.Y.Z"`
-3. Tag release: `git tag vX.Y.Z`
-4. Push to GitHub: `git push && git push --tags`
+1. Make your code changes
+2. Update VERSION file with new version number
+3. Commit changes: `git commit -am "Release vX.Y.Z"`
+4. Push to GitHub: `git push`
 5. GitHub Actions automatically:
    - Compiles the PHAR
    - Creates GitHub release
    - Uploads PHAR as release asset
+
+See [CI-CD-WORKFLOW.md](CI-CD-WORKFLOW.md) for detailed workflow documentation.
 
 ## License
 
